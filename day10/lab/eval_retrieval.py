@@ -22,6 +22,19 @@ load_dotenv()
 ROOT = Path(__file__).resolve().parent
 
 
+def _build_embedding_function():
+    from chromadb.utils import embedding_functions
+
+    provider = os.environ.get("EMBEDDING_PROVIDER", "jina").strip().lower()
+    model_name = os.environ.get("EMBEDDING_MODEL", "jina-embeddings-v3").strip()
+    if provider == "jina":
+        api_key = os.environ.get("JINA_API_KEY", "").strip()
+        if not api_key:
+            raise ValueError("Missing JINA_API_KEY for EMBEDDING_PROVIDER=jina")
+        return embedding_functions.JinaEmbeddingFunction(api_key=api_key, model_name=model_name)
+    return embedding_functions.SentenceTransformerEmbeddingFunction(model_name=model_name)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -39,9 +52,8 @@ def main() -> int:
 
     try:
         import chromadb
-        from chromadb.utils import embedding_functions
     except ImportError:
-        print("Install: pip install chromadb sentence-transformers", file=sys.stderr)
+        print("Install: pip install -r requirements.txt", file=sys.stderr)
         return 1
 
     qpath = Path(args.questions)
@@ -52,10 +64,13 @@ def main() -> int:
     questions = json.loads(qpath.read_text(encoding="utf-8"))
     db_path = os.environ.get("CHROMA_DB_PATH", str(ROOT / "chroma_db"))
     collection_name = os.environ.get("CHROMA_COLLECTION", "day10_kb")
-    model_name = os.environ.get("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 
     client = chromadb.PersistentClient(path=db_path)
-    emb = embedding_functions.SentenceTransformerEmbeddingFunction(model_name=model_name)
+    try:
+        emb = _build_embedding_function()
+    except ValueError as e:
+        print(f"Embedding config error: {e}", file=sys.stderr)
+        return 1
     try:
         col = client.get_collection(name=collection_name, embedding_function=emb)
     except Exception as e:
